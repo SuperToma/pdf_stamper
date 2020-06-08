@@ -5,53 +5,72 @@ error_reporting(E_ALL);
 set_time_limit (300);
 @ob_end_clean();
 
-$folderOriginals = 'originals';
-$folderStamped = 'stamped';
+const FOLDER_ORIGINALS = 'originals';
+const FOLDER_STAMPED = 'stamped';
 
-$originalPDFs = glob($folderOriginals.'/*.pdf');
+$originalPDFs = glob(FOLDER_ORIGINALS.'/*.pdf');
 
 if(empty($originalPDFs)) {
-	die('No PDFs found in folder "'.$folderOriginals.'". Please add yours inside.');
+	die('No PDFs found in folder "'.FOLDER_ORIGINALS.'". Please add yours inside.');
 }
 
-if(!is_dir($folderStamped)) {
-	die('Folder "'.$folderStamped.'" does not exists. Please create.');
+if(!is_dir(FOLDER_STAMPED)) {
+	die('Folder "'.FOLDER_STAMPED.'" does not exists. Please create.');
 }
 
-if(!is_writable($folderStamped)) {
-	die('Folder "'.$folderStamped.'" is not writable. Please check rights.');
+if(!is_writable(FOLDER_STAMPED)) {
+	die('Folder "'.FOLDER_STAMPED.'" is not writable. Please check rights.');
 }
 
 //Clean old files
-foreach(glob($folderStamped.'/*.pdf') as $oldPDF) {
+foreach(glob(FOLDER_STAMPED.'/*.pdf') as $oldPDF) {
 	unlink($oldPDF);
 }
 
-foreach(glob($folderStamped.'/*.jpg') as $oldJPG) {
+foreach(glob(FOLDER_STAMPED.'/*.jpg') as $oldJPG) {
 	unlink($oldJPG);
 }
 
 // Form is sent
-if(isset($_POST['pdf'])) {
-	$startTime = $tmpTime = microtime(true);
+if(isset($_POST['pdfs'])) {
+	$startTime = microtime(true);
+
+	$filenames = [];
+	foreach($_POST['pdfs'] as $pdfPath) {
+		$filenames[] = generatePdf($pdfPath);
+	}
+
+	echo 'Finished. (total: '.round(microtime(true) - $startTime, 2).' sec)<br /><br />';
+
+	echo '<center>';
+	foreach($filenames as $filename) {
+		echo '<a target="_blank" href="./'.FOLDER_STAMPED.'/'.$filename.'">'.$filename.'</a><br />';	
+	}
+
+	echo '</center><hr />';
+}
+
+function generatePdf($pdfPath) {
+	$startTime = microtime(true);
 
 	$pdf = new Imagick();
 	$pdf->setResolution(200, 200);
 
-	echo 'Starting opening file: "'.$_POST['pdf'].'" ...<br />';
+	echo 'Starting opening file: "'.$pdfPath.'" ...<br />';
 	flush();
 
-	$pdf->readImage($_POST['pdf']);
+	$pdf->readImage($pdfPath);
 	$nbPages = $pdf->getNumberImages();
 
 	echo $nbPages.' pages found ('.round(microtime(true) - $startTime, 2).' sec.)<br />';
+	echo 'Stamping pages: ';
 	flush();
 
 	$pdf->setImageCompressionQuality(100);
 	
 	// Stamp each page of the PDF
 	for ($i = 0; $i < $nbPages; $i++) {
-		$tmpTime = microtime(true);
+		$startTime = microtime(true);
         $pdf->setIteratorIndex($i);
 
         $stamp = new ImagickDraw();
@@ -62,39 +81,33 @@ if(isset($_POST['pdf'])) {
 	    $stamp->setGravity(Imagick::GRAVITY_CENTER);
  	    $pdf->annotateImage($stamp, 0, 0, -56, $_POST['name']);
 
- 	    $pdf->writeImage($folderStamped.'/'.$i.'.jpg');
+ 	    $pdf->writeImage(FOLDER_STAMPED.'/'.$i.'.jpg');
 
-        echo "Page ".($i + 1)." stamped (".round(microtime(true) - $tmpTime, 2)." sec)<br />";
+        echo ($i + 1)." ".($i == $nbPages - 1 ? '!' : '');
 		flush();
 	}
 
 	// Make final PDF with all images
-	$filename = ltrim($_POST['pdf'], $folderOriginals.'/');
+	$filename = ltrim($pdfPath, FOLDER_ORIGINALS.'/');
 	$filename = rtrim($filename, '.pdf');
 	$filename .= '_'.$_POST['name'].'.pdf';
 
 	$images = [];
 	for ($i = 0; $i < $nbPages; $i++) {
-		$images[] = $folderStamped.'/'.$i.'.jpg';
+		$images[] = FOLDER_STAMPED.'/'.$i.'.jpg';
 	} 
 
-	echo 'Exporting PDF file...<br />';
+	echo '<br />Creating PDF file... ';
 	flush();
 	
-	$tmpTime = microtime(true);
+	$startTime = microtime(true);
 	$pdf = new Imagick($images);
 	$pdf->setImageFormat('pdf');
-	$pdf->writeImages($folderStamped.'/'.$filename, true);
+	$pdf->writeImages(FOLDER_STAMPED.'/'.$filename, true);
 
-	echo 'Exported ! ('.round(microtime(true) - $tmpTime, 2).' sec)<br /><br />';
+	echo 'done ('.round(microtime(true) - $startTime, 2).' sec)<br /><br />';
 
-	echo 'Finished. (total: '.round(microtime(true) - $startTime, 2).' sec)<br /><br />';
-
-	echo '
-	<center>
-		<a target="_blank" href="./'.$folderStamped.'/'.$filename.'">'.$filename.'</a>
-	</center>
-	<hr />';
+	return $filename;
 }
 ?>
 
@@ -106,17 +119,26 @@ if(isset($_POST['pdf'])) {
 				<td><input type="text" name="name" width="120" value="Sold to " /></td>
 			</tr>
 			<tr>
-				<td>pdf: </td>
+				<td>Filter: </td>
 				<td>
-					<select name="pdf">
-						<option value="">-- Choose a pdf --</option>
-						<?php
-							foreach (array_reverse($originalPDFs) as $file) {
-								$filename = ltrim($file, $folderOriginals.'/');
-								echo '<option value="'.$file.'">'.$filename.'</option>';
-							}
-						?>
+					<select onchange="doFilter(this)">
+						<option>Filter</option>
+						<option value="- FR" class="pdf">- FR</option>
+						<option value="- EN" class="pdf">- EN</option>
 					</select>
+				<td>
+			</tr>
+			<tr>
+				<td colspan="2">
+					<?php
+						foreach (array_reverse($originalPDFs) as $file) {
+							$filename = ltrim($file, FOLDER_ORIGINALS.'/');
+							echo '
+							<div class="pdfs">
+								<input type="checkbox" name="pdfs[]" value="'.$file.'" />'.$filename.'
+							</div>';
+						}
+					?>
 				</td>
 			</tr>
 			<tr>
@@ -124,3 +146,19 @@ if(isset($_POST['pdf'])) {
 			</tr>
 	</form>
 </center>
+
+<script type="text/javascript">
+	function doFilter(selector) {
+		var elements = document.getElementsByClassName("pdfs");
+
+		Array.prototype.forEach.call(elements, function(el) {
+			if(el.childNodes[1].value.includes(selector.value)) {
+				el.style.display = "block";
+			} else {
+				el.style.display = "none";
+			}
+		});
+
+		// alert(selector.value);
+	}
+</script>
